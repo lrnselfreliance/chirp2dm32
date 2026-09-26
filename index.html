@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chirp to DM-32 Converter</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #1c1e21; --muted: #5b6270; --card: #fff; --line: #d9dde3;
+    --accent: #1f6feb; --accent-fg: #fff; --warn-bg: #fff4d6; --warn-fg: #6b4b00;
+    --ok-bg: #e3f6e8; --ok-fg: #14532d; --drop: #eef2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216; --fg: #e6e8eb; --muted: #9aa3b0; --card: #171b21; --line: #2b323c;
+      --accent: #4c8dff; --warn-bg: #3a2e0a; --warn-fg: #ffd77a; --ok-bg: #0f2e1a; --ok-fg: #8fe0a8; --drop: #1d232b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 32px 16px; text-align: center; background: var(--drop); cursor: pointer; }
+  .drop.over { border-color: var(--accent); }
+  .drop input { display: none; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; margin-top: 12px; }
+  label { display: block; font-size: 0.92rem; }
+  label span { display: block; color: var(--muted); font-size: 0.8rem; }
+  input[type=text], input[type=number] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
+  button { padding: 10px 18px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .note { padding: 10px 12px; border-radius: 8px; font-size: 0.92rem; margin-top: 12px; }
+  .warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; white-space: nowrap; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+  th { position: sticky; top: 0; background: var(--card); }
+  details summary { cursor: pointer; font-weight: 600; }
+  ul { padding-left: 20px; }
+  code { background: var(--drop); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  footer { color: var(--muted); font-size: 0.85rem; margin-top: 24px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chirp to Baofeng DM-32 Converter</h1>
+  <p class="sub">Turn a Chirp CSV export into a channel CSV the Baofeng DM-32 CPS can import. Everything runs in your browser. Nothing is uploaded.</p>
+
+  <div class="card">
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept=".csv,text/csv">
+      <strong>Drop a Chirp CSV here or click to choose one</strong>
+      <div class="sub" id="fname" style="margin:6px 0 0">No file selected</div>
+    </label>
+
+    <div class="opts">
+      <label>Channel numbering
+        <span>Renumber from 1, or keep Chirp's Location column</span>
+        <select id="numbering" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit">
+          <option value="renumber">Renumber sequentially</option>
+          <option value="keep">Keep Chirp Location</option>
+        </select>
+      </label>
+      <label>First channel number
+        <span>Used when renumbering</span>
+        <input type="number" id="start" value="1" min="1">
+      </label>
+      <label>DMR ID name
+        <span>The radio ID entry name in your CPS (DMR ID column)</span>
+        <input type="text" id="dmrid" value="None">
+      </label>
+      <label>Squelch level
+        <span>0 to 9</span>
+        <input type="number" id="squelch" value="3" min="0" max="9">
+      </label>
+      <label>High power threshold (W)
+        <span>Chirp power at or above this becomes High, otherwise Low</span>
+        <input type="number" id="hipow" value="4" step="0.5" min="0">
+      </label>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:18px">
+        <input type="checkbox" id="forbid" checked> Set Forbid TX on Chirp "off" duplex channels
+      </label>
+    </div>
+
+    <div class="row">
+      <button id="download" disabled>Download DM-32 CSV</button>
+      <span id="count" class="sub"></span>
+    </div>
+    <div id="notes"></div>
+  </div>
+
+  <div class="card">
+    <details open>
+      <summary>Preview</summary>
+      <div class="tablewrap" id="preview"><p class="sub">Load a file to see the converted channels.</p></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>How the fields are mapped</summary>
+      <ul>
+        <li><strong>TX frequency</strong> is computed from Chirp's Duplex and Offset. <code>+</code> and <code>-</code> add or subtract the offset, <code>split</code> uses Offset as the absolute TX frequency, blank or <code>off</code> copies RX.</li>
+        <li><strong>Duplex off</strong> (receive only) sets Forbid TX to 1 so the radio cannot transmit there.</li>
+        <li><strong>Mode</strong> NFM becomes 12.5KHz, FM becomes 25KHz.</li>
+        <li><strong>Power</strong> at or above the threshold becomes High, otherwise Low. The DM-32 has two levels.</li>
+        <li><strong>Tones</strong>: Tone, TSQL, DTCS and Cross modes are mapped into CTC/DCS Encode and Decode. CTCSS is written like <code>100.0</code>, DCS like <code>D023N</code> or <code>D023I</code>.</li>
+        <li><strong>Everything else</strong> uses plain analog defaults matching a DM-32 CPS export: Carrier/CTC squelch, no scan list, no APRS, Slot 1, colour code 0.</li>
+        <li><strong>Skip</strong> and <strong>Comment</strong> are dropped. The DM-32 handles scanning through scan lists.</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>After importing: zones</summary>
+      <p>The DM-32 only lets you select channels that belong to the current <strong>zone</strong>. Importing channels does not put them in a zone, so after the import open the Zone tab in the CPS and add the channels. Each zone holds up to 64 channels, so more than 64 channels need at least two zones. If the radio wraps back to channel 1 early, the zone is the reason.</p>
+      <p>The DM-32 is a VHF/UHF radio. Channels outside 136 to 174 MHz and 400 to 480 MHz, such as 1.25 m ham channels, will be flagged below and may be rejected by the CPS.</p>
+    </details>
+  </div>
+
+  <footer>Also available as a command line script: <a href="https://github.com/lrnselfreliance/chirp2dm32">chirp2dm32.py on GitHub</a>.</footer>
+</main>
+
+<script>
+const HEADER = ["No.","Channel Name","Channel Type","RX Frequency[MHz]","TX Frequency[MHz]","Power","Band Width","Scan List","TX Admit","Emergency System","Squelch Level","APRS Report Type","Forbid TX","APRS Receive","Forbid Talkaround","Auto Scan","Lone Work","Emergency Indicator","Emergency ACK","Analog APRS PTT Mode","Digital APRS PTT Mode","TX Contact","RX Group List","Color Code","Time Slot","Encryption","Encryption ID","APRS Report Channel","Direct Dual Mode","Private Confirm","Short Data Confirm","DMR ID","CTC/DCS Decode","CTC/DCS Encode","Scramble","RX Squelch Mode","Signaling Type","PTT ID","VOX Function","PTT ID Display"];
+
+const DEFAULTS = {
+  "Channel Type":"Analog","Power":"Low","Band Width":"12.5KHz","Scan List":"None","TX Admit":"Allow TX",
+  "Emergency System":"None","Squelch Level":"3","APRS Report Type":"Off","Forbid TX":"0","APRS Receive":"0",
+  "Forbid Talkaround":"0","Auto Scan":"0","Lone Work":"0","Emergency Indicator":"0","Emergency ACK":"0",
+  "Analog APRS PTT Mode":"0","Digital APRS PTT Mode":"0","TX Contact":"None","RX Group List":"None",
+  "Color Code":"0","Time Slot":"Slot 1","Encryption":"0","Encryption ID":"None","APRS Report Channel":"1",
+  "Direct Dual Mode":"0","Private Confirm":"0","Short Data Confirm":"0","DMR ID":"None",
+  "CTC/DCS Decode":"None","CTC/DCS Encode":"None","Scramble":"None","RX Squelch Mode":"Carrier/CTC",
+  "Signaling Type":"None","PTT ID":"OFF","VOX Function":"0","PTT ID Display":"0",
+};
+
+// Minimal RFC 4180 CSV parser (handles quotes, CRLF, embedded commas).
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(field); field = ""; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i+1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = "";
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ""));
+}
+
+function toCSV(header, rows) {
+  const esc = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  return [header, ...rows.map(r => header.map(h => r[h] ?? ""))]
+    .map(r => r.map(esc).join(",")).join("\r\n") + "\r\n";
+}
+
+const fmtFreq = mhz => mhz.toFixed(5);
+const fmtCtcss = hz => parseFloat(hz).toFixed(1);
+const fmtDcs = (code, inv) => "D" + String(parseInt(code, 10)).padStart(3, "0") + (inv ? "I" : "N");
+
+function tones(row) {
+  const mode = (row.Tone || "").trim();
+  const rtone = row.rToneFreq || "88.5", ctone = row.cToneFreq || "88.5";
+  const dtcs = row.DtcsCode || "023", rxDtcs = row.RxDtcsCode || dtcs;
+  const pol = row.DtcsPolarity || "NN";
+  const txInv = pol[0] === "R", rxInv = pol[pol.length-1] === "R";
+  switch (mode) {
+    case "": return ["None", "None"];
+    case "Tone": return ["None", fmtCtcss(rtone)];
+    case "TSQL": return [fmtCtcss(ctone), fmtCtcss(ctone)];
+    case "DTCS": return [fmtDcs(dtcs, rxInv), fmtDcs(dtcs, txInv)];
+    case "Cross": {
+      const [tx, rx] = (row.CrossMode || "Tone->Tone").split("->");
+      const enc = tx === "Tone" ? fmtCtcss(rtone) : tx === "DTCS" ? fmtDcs(dtcs, txInv) : "None";
+      const dec = rx === "Tone" ? fmtCtcss(ctone) : rx === "DTCS" ? fmtDcs(rxDtcs, rxInv) : "None";
+      return [dec, enc];
+    }
+    default: throw new Error(`Unknown Chirp tone mode "${mode}" on ${row.Name}`);
+  }
+}
+
+function inBand(mhz) { return (mhz >= 136 && mhz <= 174) || (mhz >= 400 && mhz <= 480); }
+
+function convert(chirpRows, opts) {
+  const out = [], warnings = [];
+  chirpRows.forEach((row, i) => {
+    const rx = parseFloat(row.Frequency);
+    const offset = parseFloat(row.Offset || "0") || 0;
+    const duplex = (row.Duplex || "").trim();
+    let tx = rx;
+    if (duplex === "+") tx = rx + offset;
+    else if (duplex === "-") tx = rx - offset;
+    else if (duplex === "split") tx = offset;
+    const watts = parseFloat(String(row.Power || "").replace(/w$/i, ""));
+    const [dec, enc] = tones(row);
+    const number = opts.keep ? parseInt(row.Location, 10) : opts.start + i;
+    const rec = Object.assign({}, DEFAULTS, {
+      "No.": String(number),
+      "Channel Name": (row.Name || "").trim(),
+      "RX Frequency[MHz]": fmtFreq(rx),
+      "TX Frequency[MHz]": fmtFreq(tx),
+      "Power": (!isNaN(watts) && watts >= opts.hipow) ? "High" : "Low",
+      "Band Width": row.Mode === "NFM" ? "12.5KHz" : "25KHz",
+      "Squelch Level": String(opts.squelch),
+      "DMR ID": opts.dmrid,
+      "CTC/DCS Decode": dec,
+      "CTC/DCS Encode": enc,
+      "Forbid TX": (duplex === "off" && opts.forbid) ? "1" : "0",
+    });
+    if (!inBand(rx) || !inBand(tx)) warnings.push(`${rec["No."]} ${rec["Channel Name"]} at ${rec["RX Frequency[MHz]"]} MHz is outside the DM-32's VHF/UHF range.`);
+    if (rec["Channel Name"].length > 16) warnings.push(`${rec["No."]} "${rec["Channel Name"]}" is longer than 16 characters.`);
+    out.push(rec);
+  });
+  return { rows: out, warnings };
+}
+
+// UI
+const $ = id => document.getElementById(id);
+let chirpRows = null, result = null, baseName = "dm32";
+
+function opts() {
+  return {
+    keep: $("numbering").value === "keep",
+    start: parseInt($("start").value, 10) || 1,
+    dmrid: $("dmrid").value.trim() || "None",
+    squelch: parseInt($("squelch").value, 10) || 0,
+    hipow: parseFloat($("hipow").value) || 0,
+    forbid: $("forbid").checked,
+  };
+}
+
+function render() {
+  const notes = $("notes"); notes.innerHTML = "";
+  if (!chirpRows) return;
+  try {
+    result = convert(chirpRows, opts());
+  } catch (e) {
+    notes.innerHTML = `<div class="note warn">${e.message}</div>`;
+    $("download").disabled = true; return;
+  }
+  $("count").textContent = `${result.rows.length} channels converted`;
+  $("download").disabled = result.rows.length === 0;
+  if (result.rows.length > 64) result.warnings.unshift(`${result.rows.length} channels will need at least ${Math.ceil(result.rows.length / 64)} zones in the CPS (64 channels per zone).`);
+  if (result.warnings.length) notes.innerHTML = `<div class="note warn"><ul style="margin:0">${result.warnings.map(w => `<li>${w}</li>`).join("")}</ul></div>`;
+  else notes.innerHTML = `<div class="note ok">No warnings. Remember to add the channels to a zone after importing.</div>`;
+  const show = ["No.","Channel Name","RX Frequency[MHz]","TX Frequency[MHz]","Power","Band Width","Forbid TX","CTC/DCS Decode","CTC/DCS Encode"];
+  $("preview").innerHTML = `<table><thead><tr>${show.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>` +
+    result.rows.map(r => `<tr>${show.map(h => `<td>${r[h]}</td>`).join("")}</tr>`).join("") + `</tbody></table>`;
+}
+
+function loadFile(file) {
+  if (!file) return;
+  baseName = file.name.replace(/\.csv$/i, "") + "_dm32";
+  $("fname").textContent = file.name;
+  file.text().then(text => {
+    const rows = parseCSV(text.replace(/^﻿/, ""));
+    const header = rows.shift() || [];
+    if (!header.includes("Frequency") || !header.includes("Name")) {
+      $("notes").innerHTML = `<div class="note warn">This does not look like a Chirp CSV. Expected columns like Location, Name, Frequency, Duplex, Offset.</div>`;
+      chirpRows = null; $("download").disabled = true; return;
+    }
+    chirpRows = rows.map(r => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""]))).filter(r => r.Frequency);
+    render();
+  });
+}
+
+$("file").addEventListener("change", e => loadFile(e.target.files[0]));
+const drop = $("drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); loadFile(e.dataTransfer.files[0]); });
+["numbering","start","dmrid","squelch","hipow","forbid"].forEach(id => $(id).addEventListener("input", render));
+$("download").addEventListener("click", () => {
+  const blob = new Blob([toCSV(HEADER, result.rows)], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = baseName + ".csv"; a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
